@@ -1,0 +1,126 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+
+#include "lire_ecrire.h"
+#include "couples.h"
+#include "triangulation.h"
+#include "morphing_core.h"
+
+/* ------- utilitaires nom de fichier ------- */
+
+static const char* basename_simple(const char *path) {
+    const char *p = strrchr(path, '/');
+    return (p != NULL) ? (p + 1) : path;
+}
+
+static void sans_extension_ppm(char *dst, size_t dstsz, const char *src) {
+    const char *base = basename_simple(src);
+    size_t n = strlen(base);
+
+    if (n >= 4 && strcmp(base + (n - 4), ".ppm") == 0) n -= 4;
+
+    if (n + 1 > dstsz) {
+        fprintf(stderr, "Erreur: nom trop long\n");
+        exit(EXIT_FAILURE);
+    }
+    memcpy(dst, base, n);
+    dst[n] = '\0';
+}
+
+static void construire_couples_file(char *out, size_t outsz, const char *img1, const char *img2) {
+    char n1[512], n2[512];
+    sans_extension_ppm(n1, sizeof(n1), img1);
+    sans_extension_ppm(n2, sizeof(n2), img2);
+
+    int needed = snprintf(out, outsz, "%s_%s.couplesdepoints", n1, n2);
+    if (needed < 0 || (size_t)needed >= outsz) {
+        fprintf(stderr, "Erreur: nom couples trop long\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
+static void mkdir_if_needed(const char *dir) {
+    mkdir(dir, 0777);
+}
+
+static P2 interp_point(P2 a, P2 b, double alpha) {
+    P2 p;
+    p.x = (int)((1.0 - alpha) * (double)a.x + alpha * (double)b.x + 0.5);
+    p.y = (int)((1.0 - alpha) * (double)a.y + alpha * (double)b.y + 0.5);
+    return p;
+}
+
+int main(int argc, char *argv[]) {
+    if (argc != 4) {
+        fprintf(stderr, "Usage: %s Image_Depart.ppm Image_Arrivee.ppm N\n", argv[0]);
+        return EXIT_FAILURE;
+    }
+
+    const char *fdep = argv[1];
+    const char *farr = argv[2];
+    int N = atoi(argv[3]);
+
+    if (N <= 0) {
+        fprintf(stderr, "Erreur: N doit etre >= 1\n");
+        return EXIT_FAILURE;
+    }
+
+    /* 1) Lire images (range 255 chez toi : parfait) */
+    IMAGE dep = lire_fichier((char*)fdep);
+    IMAGE arr = lire_fichier((char*)farr);
+
+    /* 2) Déduire automatiquement le fichier de couples (nom intelligent)  */
+    char couples_file[1024];
+    construire_couples_file(couples_file, sizeof(couples_file), fdep, farr);
+
+    /* 3) Lire couples de points */
+    COUPLE *couples = NULL;
+    int M = lire_couples(couples_file, &couples);
+
+    mkdir_if_needed("frames");
+
+    /* 4) Générer N+1 images intermédiaires  */
+    for (int k = 0; k <= N; k++) {
+        double alpha = (double)k / (double)N;
+
+        /* 4.1 points intermédiaires :contentReference[oaicite:8]{index=8} */
+        P2 *pts_int = (P2*)malloc((size_t)M * sizeof(P2));
+        if (!pts_int) return EXIT_FAILURE;
+
+        for (int i = 0; i < M; i++) {
+            pts_int[i] = interp_point(couples[i].dep, couples[i].arr, alpha);
+        }
+
+        /* 4.2 triangulation :contentReference[oaicite:9]{index=9} */
+        TRI *tris = NULL;
+        int T = trianguler(pts_int, M, &tris);
+
+        /* 4.3 couleur par barycentriques + interpolation couleur :contentReference[oaicite:10]{index=10} */
+        IMAGE imgk = calculer_image_intermediaire(dep, arr, couples, M, pts_int, tris, T, alpha);
+
+        /* 4.4 sauvegarde :contentReference[oaicite:11]{index=11} */
+        char outname[256];
+        snprintf(outname, sizeof(outname), "frames/img_%03d.ppm", k);
+        ecrire_fichier(imgk, outname);
+
+        liberer_image(imgk);
+        free(tris);
+        free(pts_int);
+
+        printf("Ecrit %s\n", outname);
+    }
+
+    free(couples);
+    liberer_image(dep);
+    liberer_image(arr);
+
+    /* 5) Film avec ffmpeg (commande standard) 
+       -> je ne lance pas system() ici par défaut, mais tu peux le faire si tu veux. */
+    printf("Pour faire la video:\n");
+    printf("ffmpeg -framerate %d -i frames/img_%%03d.ppm -pix_fmt yuv420p morphing.mp4\n",
+           (N + 1) / 10); /* ~10 secondes */
+
+    return EXIT_SUCCESS;
+}

@@ -42,6 +42,7 @@ static void construire_couples_file(char *out, size_t outsz, const char *img1, c
 }
 
 static void mkdir_if_needed(const char *dir) {
+    /* si existe déjà, ce n’est pas bloquant */
     mkdir(dir, 0777);
 }
 
@@ -67,40 +68,46 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    /* 1) Lire images (range 255 chez toi : parfait) */
+    /* 1) Lire images */
     IMAGE dep = lire_fichier((char*)fdep);
     IMAGE arr = lire_fichier((char*)farr);
 
-    /* 2) Déduire automatiquement le fichier de couples (nom intelligent)  */
+    /* 2) Déduire automatiquement le fichier de couples */
     char couples_file[1024];
     construire_couples_file(couples_file, sizeof(couples_file), fdep, farr);
 
-    /* 3) Lire couples de points */
+    /* 3) Lire couples */
     COUPLE *couples = NULL;
     int M = lire_couples(couples_file, &couples);
 
     mkdir_if_needed("frames");
 
-    /* 4) Générer N+1 images intermédiaires  */
+    /* 4) Générer N+1 images intermédiaires */
     for (int k = 0; k <= N; k++) {
         double alpha = (double)k / (double)N;
 
-        /* 4.1 points intermédiaires :contentReference[oaicite:8]{index=8} */
+        /* Points intermédiaires */
         P2 *pts_int = (P2*)malloc((size_t)M * sizeof(P2));
-        if (!pts_int) return EXIT_FAILURE;
+        if (!pts_int) {
+            fprintf(stderr, "Erreur: malloc pts_int\n");
+            free(couples);
+            liberer_image(dep);
+            liberer_image(arr);
+            return EXIT_FAILURE;
+        }
 
         for (int i = 0; i < M; i++) {
             pts_int[i] = interp_point(couples[i].dep, couples[i].arr, alpha);
         }
 
-        /* 4.2 triangulation :contentReference[oaicite:9]{index=9} */
+        /* Triangulation */
         TRI *tris = NULL;
         int T = trianguler(pts_int, M, &tris);
 
-        /* 4.3 couleur par barycentriques + interpolation couleur :contentReference[oaicite:10]{index=10} */
+        /* Calcul de l'image intermédiaire (couleur) */
         IMAGE imgk = calculer_image_intermediaire(dep, arr, couples, M, pts_int, tris, T, alpha);
 
-        /* 4.4 sauvegarde :contentReference[oaicite:11]{index=11} */
+        /* Sauvegarde */
         char outname[256];
         snprintf(outname, sizeof(outname), "frames/img_%03d.ppm", k);
         ecrire_fichier(imgk, outname);
@@ -116,11 +123,24 @@ int main(int argc, char *argv[]) {
     liberer_image(dep);
     liberer_image(arr);
 
-    /* 5) Film avec ffmpeg (commande standard) 
-       -> je ne lance pas system() ici par défaut, mais tu peux le faire si tu veux. */
-    printf("Pour faire la video:\n");
-    printf("ffmpeg -framerate %d -i frames/img_%%03d.ppm -pix_fmt yuv420p morphing.mp4\n",
-           (N + 1) / 10); /* ~10 secondes */
+    /* 5) Création du film (~10 secondes) via ffmpeg */
+    int fr = (N + 1) / 10;
+    if (fr < 1) fr = 1;
 
+    char cmd[2048];
+    snprintf(cmd, sizeof(cmd),
+             "ffmpeg -y -framerate %d -i frames/img_%%03d.ppm -pix_fmt yuv420p morphing.mp4",
+             fr);
+
+    printf("Creation video via ffmpeg...\n");
+    printf("%s\n", cmd);
+
+    int rc = system(cmd);
+    if (rc != 0) {
+        fprintf(stderr, "Attention: ffmpeg a echoue (code %d). Verifie que ffmpeg est installe.\n", rc);
+        return EXIT_FAILURE;
+    }
+
+    printf("Video creee: morphing.mp4\n");
     return EXIT_SUCCESS;
 }

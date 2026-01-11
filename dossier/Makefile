@@ -7,6 +7,7 @@ CFLAGS  = -Wall -Wextra -std=c99
 
 EXEC_MORPH   = morphing
 EXEC_SELECT  = select_points
+EXEC_CONVERT = convert_images
 
 # =======================
 # Objets
@@ -20,8 +21,10 @@ OBJ_MORPH  = morphing.o \
              couples.o geom.o triangulation.o morphing_core.o \
              $(OBJ_COMMON)
 
+OBJ_CONVERT = convert_images.o
+
 # =======================
-# Headers
+# Headers (pour dépendances)
 # =======================
 
 HEADERS = morphing_type.h \
@@ -34,7 +37,7 @@ HEADERS = morphing_type.h \
           morphing_core.h
 
 # =======================
-# Librairies graphiques (seulement pour select_points)
+# Librairies graphiques (uniquement pour select_points)
 # =======================
 
 GRAPH_LIBS = -luvsqgraphics_2 -lSDL2 -lSDL2_ttf -lm
@@ -43,14 +46,18 @@ GRAPH_LIBS = -luvsqgraphics_2 -lSDL2 -lSDL2_ttf -lm
 # Règles principales
 # =======================
 
-all: $(EXEC_SELECT) $(EXEC_MORPH)
+all: $(EXEC_SELECT) $(EXEC_MORPH) $(EXEC_CONVERT)
 
-# -------- select_points --------
+# -------- select_points (graphique) --------
 $(EXEC_SELECT): $(OBJ_SELECT)
 	$(CC) $(CFLAGS) -o $@ $^ $(GRAPH_LIBS)
 
-# -------- morphing --------
+# -------- morphing (final projet, sans libs graphiques) --------
 $(EXEC_MORPH): $(OBJ_MORPH)
+	$(CC) $(CFLAGS) -o $@ $^
+
+# -------- convert_images (ImageMagick via system()) --------
+$(EXEC_CONVERT): $(OBJ_CONVERT)
 	$(CC) $(CFLAGS) -o $@ $^
 
 # =======================
@@ -60,16 +67,15 @@ $(EXEC_MORPH): $(OBJ_MORPH)
 %.o: %.c $(HEADERS)
 	$(CC) $(CFLAGS) -c $<
 
+convert_images.o: convert_images.c
+	$(CC) $(CFLAGS) -c $<
+
 # =======================
-# Nettoyage
+# Nettoyage / archive
 # =======================
 
 clean:
-	rm -f *.o $(EXEC_SELECT) $(EXEC_MORPH)
-
-# =======================
-# Archive à rendre
-# =======================
+	rm -f *.o $(EXEC_SELECT) $(EXEC_MORPH) $(EXEC_CONVERT)
 
 zip:
 	zip -r IN304_TONNOM.zip *.c *.h Makefile
